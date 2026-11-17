@@ -1,0 +1,1325 @@
+<!DOCTYPE html>
+<html lang="ms">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Perisai Laser: Sifir Angkasa (Tahun 3)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <!-- Google Fonts: Orbitron & Fredoka untuk tema arked angkasa yang mesra murid -->
+    <link rel="preconnect" href="https://fonts.googleapis.com">
+    <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+    <link href="https://fonts.googleapis.com/css2?family=Fredoka:wght@500;600;700&family=Orbitron:wght@600;700;900&display=swap" rel="stylesheet">
+    
+    <!-- Google MediaPipe Hands & Camera Utils CDN -->
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/camera_utils/camera_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/drawing_utils/drawing_utils.js" crossorigin="anonymous"></script>
+    <script src="https://cdn.jsdelivr.net/npm/@mediapipe/hands/hands.js" crossorigin="anonymous"></script>
+
+    <style>
+        body {
+            font-family: 'Fredoka', sans-serif;
+            background-color: #050814;
+            color: #ffffff;
+            overflow: hidden;
+            user-select: none;
+            margin: 0;
+            padding: 0;
+        }
+        .font-orbitron {
+            font-family: 'Orbitron', sans-serif;
+        }
+        /* Kesan Neon & Glow */
+        .neon-text-cyan {
+            text-shadow: 0 0 10px rgba(34, 211, 238, 0.8), 0 0 20px rgba(34, 211, 238, 0.5);
+        }
+        .neon-text-amber {
+            text-shadow: 0 0 12px rgba(251, 191, 36, 0.9), 0 0 24px rgba(245, 158, 11, 0.6);
+        }
+        .neon-box {
+            box-shadow: 0 0 20px rgba(56, 189, 248, 0.35), inset 0 0 15px rgba(56, 189, 248, 0.2);
+        }
+        .glass-panel {
+            background: rgba(11, 18, 40, 0.82);
+            backdrop-filter: blur(12px);
+            -webkit-backdrop-filter: blur(12px);
+            border: 2px solid rgba(56, 189, 248, 0.4);
+        }
+        /* Animasi Butang Arked */
+        .arcade-btn {
+            transition: all 0.15s cubic-bezier(0.4, 0, 0.2, 1);
+            box-shadow: 0 6px 0 #0284c7, 0 10px 20px rgba(14, 165, 233, 0.4);
+        }
+        .arcade-btn:hover {
+            transform: translateY(-2px);
+            box-shadow: 0 8px 0 #0284c7, 0 14px 25px rgba(14, 165, 233, 0.6);
+        }
+        .arcade-btn:active {
+            transform: translateY(4px);
+            box-shadow: 0 2px 0 #0284c7, 0 4px 10px rgba(14, 165, 233, 0.4);
+        }
+        /* Animasi Gegaran apabila hilang nyawa */
+        @keyframes shake {
+            0%, 100% { transform: translate(0, 0); }
+            20% { transform: translate(-8px, 6px); }
+            40% { transform: translate(8px, -6px); }
+            60% { transform: translate(-6px, -4px); }
+            80% { transform: translate(6px, 4px); }
+        }
+        .screen-shake {
+            animation: shake 0.35s ease-in-out;
+        }
+        /* Custom Scrollbar untuk analisis jawapan */
+        ::-webkit-scrollbar {
+            width: 8px;
+        }
+        ::-webkit-scrollbar-track {
+            background: rgba(15, 23, 42, 0.6);
+            border-radius: 10px;
+        }
+        ::-webkit-scrollbar-thumb {
+            background: #38bdf8;
+            border-radius: 10px;
+        }
+    </style>
+</head>
+<body class="relative w-screen h-screen overflow-hidden flex items-center justify-center">
+
+    <!-- Video Webcam Tersembunyi untuk Pemprosesan MediaPipe -->
+    <video id="webcamVideo" class="hidden" playsinline autoplay muted></video>
+
+    <!-- Kanvas Utama Permainan (Latar Webcam + Landmarks + Meteor + Kesan Zarah) -->
+    <canvas id="gameCanvas" class="absolute inset-0 w-full h-full block z-0"></canvas>
+
+    <!-- Lapisan Vignette Angkasa -->
+    <div class="pointer-events-none absolute inset-0 z-10 bg-[radial-gradient(circle_at_center,transparent_55%,rgba(3,7,18,0.85)_100%)]"></div>
+
+    <!-- Mesej Notifikasi Terapung (Menggantikan alert) -->
+    <div id="toastBox" class="fixed top-24 left-1/2 -translate-x-1/2 z-50 pointer-events-none opacity-0 transition-all duration-300 transform scale-90">
+        <div id="toastContent" class="px-6 py-2.5 rounded-full font-bold text-lg shadow-lg border-2"></div>
+    </div>
+
+    <!-- ================= HUD SEMASA BERMAIN ================= -->
+    <div id="gameHud" class="hidden absolute inset-0 z-20 pointer-events-none flex flex-col justify-between p-3 sm:p-5">
+        
+        <!-- Bar Atas: Nyawa, Soalan Utama, Skor & Masa -->
+        <div class="w-full max-w-6xl mx-auto flex flex-col md:flex-row items-center justify-between gap-3">
+            
+            <!-- Kiri: Nyawa (3 Hati) & Kawalan Audio -->
+            <div class="flex items-center gap-3 pointer-events-auto">
+                <div class="glass-panel px-4 py-2 rounded-2xl flex items-center gap-2">
+                    <span class="text-xs sm:text-sm uppercase tracking-wider text-cyan-300 font-bold mr-1">Perisai:</span>
+                    <div id="heartsContainer" class="flex items-center gap-1.5 text-2xl sm:text-3xl">
+                        <!-- Hati dijana oleh JS -->
+                    </div>
+                </div>
+                <button id="muteBtn" title="Tutup/Buka Bunyi" class="glass-panel p-2.5 sm:p-3 rounded-2xl text-cyan-300 hover:text-white hover:border-cyan-300 transition cursor-pointer">
+                    <svg id="soundOnIcon" class="w-6 h-6" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M15.536 8.464a5 5 0 010 7.072m2.828-9.9a9 9 0 010 12.728M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15z"></path></svg>
+                    <svg id="soundOffIcon" class="w-6 h-6 hidden text-rose-400" fill="none" stroke="currentColor" viewBox="0 0 24 24"><path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M5.586 15H4a1 1 0 01-1-1v-4a1 1 0 011-1h1.586l4.707-4.707C10.923 3.663 12 4.109 12 5v14c0 .891-1.077 1.337-1.707.707L5.586 15zM17 14l2-2m0 0l2-2m-2 2l-2-2m2 2l2 2"></path></svg>
+                </button>
+            </div>
+
+            <!-- Tengah: Kotak Persamaan Matematik Sifir -->
+            <div class="glass-panel neon-box px-6 sm:px-10 py-2.5 sm:py-3.5 rounded-3xl border-2 border-amber-400/80 flex flex-col items-center relative">
+                <span class="text-[11px] sm:text-xs font-bold uppercase tracking-widest text-amber-300 mb-0.5">Musnahkan Hasil Darab</span>
+                <div id="questionDisplay" class="font-orbitron text-3xl sm:text-5xl font-black text-white neon-text-amber tracking-wider">
+                    4 × 6 = ?
+                </div>
+            </div>
+
+            <!-- Kanan: Skor, Kombo & Pemasa -->
+            <div class="flex items-center gap-2.5 sm:gap-3">
+                <!-- Kombo Badge -->
+                <div id="comboBadge" class="hidden glass-panel px-3.5 py-2 rounded-2xl border-fuchsia-400/70 flex flex-col items-center animate-bounce">
+                    <span class="text-[10px] uppercase font-bold text-fuchsia-300">Kombo</span>
+                    <span id="comboText" class="font-orbitron text-xl sm:text-2xl font-black text-fuchsia-400">2x</span>
+                </div>
+
+                <!-- Skor -->
+                <div class="glass-panel px-4 py-2 rounded-2xl flex flex-col items-center min-w-[85px] sm:min-w-[100px]">
+                    <span class="text-[10px] sm:text-xs uppercase font-bold text-cyan-300">Skor</span>
+                    <span id="scoreDisplay" class="font-orbitron text-xl sm:text-2xl font-bold text-white">0</span>
+                </div>
+
+                <!-- Pemasa Undur 60 Saat -->
+                <div id="timerBox" class="glass-panel px-4 py-2 rounded-2xl flex flex-col items-center min-w-[80px] sm:min-w-[95px]">
+                    <span class="text-[10px] sm:text-xs uppercase font-bold text-emerald-300">Masa</span>
+                    <span id="timerDisplay" class="font-orbitron text-xl sm:text-2xl font-bold text-emerald-400">60s</span>
+                </div>
+            </div>
+        </div>
+
+        <!-- Bar Bawah: Petunjuk Status Tangan -->
+        <div class="w-full flex justify-center">
+            <div id="handStatusPill" class="glass-panel px-4 py-1.5 rounded-full text-xs sm:text-sm text-cyan-200 flex items-center gap-2">
+                <span id="handStatusDot" class="w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse"></span>
+                <span id="handStatusText">Mengesan tangan di hadapan kamera...</span>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= MENU MULA & PANDUAN ISYARAT ================= -->
+    <div id="startScreen" class="absolute inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/75 backdrop-blur-sm overflow-y-auto">
+        <div class="glass-panel neon-box w-full max-w-3xl rounded-3xl p-6 sm:p-8 border-2 border-cyan-400/60 text-center my-auto">
+            
+            <!-- Lencana Topik -->
+            <div class="inline-flex items-center gap-2 px-4 py-1 rounded-full bg-cyan-500/20 border border-cyan-400/50 text-cyan-300 text-xs sm:text-sm font-bold mb-3">
+                <span>🚀 MATEMATIK TAHUN 3</span>
+                <span>•</span>
+                <span>SIFIR 2 HINGGA 12</span>
+            </div>
+
+            <!-- Tajuk Permainan -->
+            <h1 class="font-orbitron text-3xl sm:text-5xl font-black text-white neon-text-cyan mb-2 tracking-tight">
+                PERISAI LASER<br><span class="text-amber-400 neon-text-amber">SIFIR ANGKASA</span>
+            </h1>
+            <p class="text-slate-300 text-sm sm:text-base max-w-xl mx-auto mb-6">
+                Lindungi stesen angkasa! Gunakan kedua-dua hujung jari telunjuk anda sebagai <strong class="text-cyan-300">Perisai Laser</strong> dan tembak meteor yang membawa jawapan darab yang betul.
+            </p>
+
+            <!-- Panduan Isyarat Tangan (Visual Cards) -->
+            <div class="grid grid-cols-1 sm:grid-cols-3 gap-3 sm:gap-4 mb-6 text-left">
+                <!-- Langkah 1 -->
+                <div class="bg-slate-900/80 border border-cyan-500/30 rounded-2xl p-4 flex flex-col items-center text-center">
+                    <div class="w-12 h-12 rounded-2xl bg-cyan-500/20 border border-cyan-400 flex items-center justify-center text-2xl mb-2">
+                        ☝️
+                    </div>
+                    <h3 class="font-bold text-cyan-300 text-sm sm:text-base mb-1">1. Sasaran Laser</h3>
+                    <p class="text-xs text-slate-300">Angkat satu atau kedua-dua tangan di hadapan kamera. Hujung jari telunjuk akan menjadi penunjuk laser.</p>
+                </div>
+
+                <!-- Langkah 2 -->
+                <div class="bg-slate-900/80 border border-amber-500/40 rounded-2xl p-4 flex flex-col items-center text-center">
+                    <div class="w-12 h-12 rounded-2xl bg-amber-500/20 border border-amber-400 flex items-center justify-center text-2xl mb-2">
+                        🤏
+                    </div>
+                    <h3 class="font-bold text-amber-300 text-sm sm:text-base mb-1">2. Isyarat PINCH</h3>
+                    <p class="text-xs text-slate-300">Arahkan laser pada meteor jawapan betul, kemudian <strong class="text-white">cubit (rapatkan ibu jari & jari telunjuk)</strong> untuk menembak!</p>
+                </div>
+
+                <!-- Langkah 3 -->
+                <div class="bg-slate-900/80 border border-rose-500/30 rounded-2xl p-4 flex flex-col items-center text-center">
+                    <div class="w-12 h-12 rounded-2xl bg-rose-500/20 border border-rose-400 flex items-center justify-center text-2xl mb-2">
+                        ❤️❤️❤️
+                    </div>
+                    <h3 class="font-bold text-rose-300 text-sm sm:text-base mb-1">3. Jaga 3 Nyawa</h3>
+                    <p class="text-xs text-slate-300">Elak menembak jawapan salah dan jangan biarkan meteor jawapan betul terlepas ke bumi dalam masa 60 saat.</p>
+                </div>
+            </div>
+
+            <!-- Pilihan Tahap Sifir -->
+            <div class="mb-6">
+                <label class="block text-xs uppercase tracking-wider text-cyan-300 font-bold mb-2">Pilih Kumpulan Sifir:</label>
+                <div class="flex flex-wrap justify-center gap-2" id="tableFilterGroup">
+                    <button type="button" data-range="all" class="filter-btn active px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-cyan-500 text-slate-950 border-2 border-cyan-300 cursor-pointer transition">Semua (Sifir 2–12)</button>
+                    <button type="button" data-range="easy" class="filter-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800/90 text-slate-300 border-2 border-slate-700 hover:border-cyan-400 cursor-pointer transition">Asas (Sifir 2, 3, 4, 5, 10)</button>
+                    <button type="button" data-range="hard" class="filter-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800/90 text-slate-300 border-2 border-slate-700 hover:border-cyan-400 cursor-pointer transition">Cabaran (Sifir 6, 7, 8, 9, 11, 12)</button>
+                </div>
+            </div>
+
+            <!-- Status Kamera & Butang Mula -->
+            <div class="flex flex-col items-center gap-3">
+                <button id="startBtn" disabled class="arcade-btn px-8 py-4 rounded-2xl bg-gradient-to-r from-cyan-400 to-sky-500 text-slate-950 font-orbitron font-black text-lg sm:text-xl tracking-wide disabled:opacity-50 disabled:cursor-not-allowed cursor-pointer flex items-center gap-3">
+                    <span id="startBtnSpinner" class="w-5 h-5 border-3 border-slate-950 border-t-transparent rounded-full animate-spin"></span>
+                    <span id="startBtnText">MENYEDIAKAN KAMERA & AI...</span>
+                </button>
+                <p id="cameraHint" class="text-xs text-slate-400">Sila benarkan akses kamera pelayar anda apabila diminta. (Tetikus juga disokong sebagai sandaran)</p>
+            </div>
+        </div>
+    </div>
+
+    <!-- ================= SKRIN KEPUTUSAN & ANALISIS JAWAPAN ================= -->
+    <div id="resultScreen" class="hidden absolute inset-0 z-30 flex items-center justify-center p-4 bg-slate-950/85 backdrop-blur-md">
+        <div class="glass-panel neon-box w-full max-w-3xl max-h-[90vh] rounded-3xl p-6 sm:p-8 border-2 border-cyan-400/60 flex flex-col">
+            
+            <!-- Header Keputusan -->
+            <div class="text-center mb-4">
+                <span id="endReasonBadge" class="inline-block px-3.5 py-1 rounded-full text-xs font-bold uppercase tracking-wider bg-amber-500/20 text-amber-300 border border-amber-400/50 mb-2">
+                    MASA TAMAT!
+                </span>
+                <h2 class="font-orbitron text-3xl sm:text-4xl font-black text-white neon-text-cyan">LAPORAN MISI ANGKASA</h2>
+            </div>
+
+            <!-- Kad Statistik -->
+            <div class="grid grid-cols-3 gap-3 mb-5">
+                <div class="bg-slate-900/90 border border-cyan-500/30 rounded-2xl p-3 text-center">
+                    <div class="text-xs text-cyan-300 font-bold uppercase">Skor Akhir</div>
+                    <div id="finalScore" class="font-orbitron text-2xl sm:text-3xl font-black text-white mt-1">0</div>
+                </div>
+                <div class="bg-slate-900/90 border border-emerald-500/30 rounded-2xl p-3 text-center">
+                    <div class="text-xs text-emerald-300 font-bold uppercase">Jawapan Betul</div>
+                    <div id="finalCorrect" class="font-orbitron text-2xl sm:text-3xl font-black text-emerald-400 mt-1">0</div>
+                </div>
+                <div class="bg-slate-900/90 border border-fuchsia-500/30 rounded-2xl p-3 text-center">
+                    <div class="text-xs text-fuchsia-300 font-bold uppercase">Kombo Tertinggi</div>
+                    <div id="finalMaxCombo" class="font-orbitron text-2xl sm:text-3xl font-black text-fuchsia-400 mt-1">0x</div>
+                </div>
+            </div>
+
+            <!-- Bahagian Analisis Jawapan Salah / Terlepas -->
+            <div class="flex-1 overflow-hidden flex flex-col bg-slate-900/70 rounded-2xl border border-slate-700/80 p-4 mb-5">
+                <h3 class="font-bold text-amber-300 text-sm sm:text-base mb-2 flex items-center gap-2">
+                    <span>📊 Analisis Kesilapan & Ulang Kaji Sifir</span>
+                </h3>
+                <div id="analysisContainer" class="overflow-y-auto pr-1 space-y-2 text-sm flex-1">
+                    <!-- Senarai analisis dijana oleh JS -->
+                </div>
+            </div>
+
+            <!-- Butang Main Semula -->
+            <div class="flex justify-center">
+                <button id="restartBtn" class="arcade-btn px-8 py-3.5 rounded-2xl bg-gradient-to-r from-amber-400 to-orange-500 text-slate-950 font-orbitron font-black text-lg tracking-wide cursor-pointer">
+                    🔄 MAIN SEMULA MISI
+                </button>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        /**
+         * ============================================================================
+         * 1. PENJANA AUDIO SINTETIK SCI-FI & MUZIK LATAR CERIA (WEB AUDIO API)
+         * ============================================================================
+         */
+        class SpaceAudioEngine {
+            constructor() {
+                this.ctx = null;
+                this.isMuted = false;
+                this.bgmInterval = null;
+                this.noteIndex = 0;
+                // Melodi arpeggio angkasa yang ceria dalam skala C Major / Pentatonic
+                this.melodyNotes = [
+                    523.25, 659.25, 783.99, 1046.50,
+                    783.99, 659.25, 587.33, 783.99,
+                    659.25, 880.00, 1046.50, 880.00,
+                    783.99, 659.25, 587.33, 493.88
+                ];
+            }
+
+            init() {
+                if (!this.ctx) {
+                    const AudioContext = window.AudioContext || window.webkitAudioContext;
+                    this.ctx = new AudioContext();
+                }
+                if (this.ctx.state === 'suspended') {
+                    this.ctx.resume();
+                }
+            }
+
+            toggleMute() {
+                this.isMuted = !this.isMuted;
+                if (this.isMuted) {
+                    this.stopBGM();
+                } else if (gameState.isPlaying) {
+                    this.startBGM();
+                }
+                return this.isMuted;
+            }
+
+            playLaser() {
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'sawtooth';
+                osc.frequency.setValueAtTime(1100, now);
+                osc.frequency.exponentialRampToValueAtTime(180, now + 0.14);
+
+                gain.gain.setValueAtTime(0.18, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.14);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.14);
+            }
+
+            playExplosionSuccess() {
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                
+                // Bunyi letupan bass
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'triangle';
+                osc.frequency.setValueAtTime(240, now);
+                osc.frequency.exponentialRampToValueAtTime(45, now + 0.3);
+                gain.gain.setValueAtTime(0.3, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.3);
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.3);
+
+                // Bunyi loceng kejayaan (chime)
+                [587.33, 880, 1174.66].forEach((freq, idx) => {
+                    const chime = this.ctx.createOscillator();
+                    const cGain = this.ctx.createGain();
+                    chime.type = 'sine';
+                    chime.frequency.setValueAtTime(freq, now + idx * 0.05);
+                    cGain.gain.setValueAtTime(0.15, now + idx * 0.05);
+                    cGain.gain.exponentialRampToValueAtTime(0.001, now + idx * 0.05 + 0.25);
+                    chime.connect(cGain);
+                    cGain.connect(this.ctx.destination);
+                    chime.start(now + idx * 0.05);
+                    chime.stop(now + idx * 0.05 + 0.25);
+                });
+            }
+
+            playError() {
+                if (this.isMuted || !this.ctx) return;
+                const now = this.ctx.currentTime;
+                const osc = this.ctx.createOscillator();
+                const gain = this.ctx.createGain();
+                osc.type = 'square';
+                osc.frequency.setValueAtTime(160, now);
+                osc.frequency.linearRampToValueAtTime(95, now + 0.28);
+
+                gain.gain.setValueAtTime(0.2, now);
+                gain.gain.exponentialRampToValueAtTime(0.001, now + 0.28);
+
+                osc.connect(gain);
+                gain.connect(this.ctx.destination);
+                osc.start(now);
+                osc.stop(now + 0.28);
+            }
+
+            startBGM() {
+                if (this.isMuted) return;
+                this.stopBGM();
+                this.noteIndex = 0;
+                this.bgmInterval = setInterval(() => {
+                    if (this.isMuted || !this.ctx || !gameState.isPlaying) return;
+                    const now = this.ctx.currentTime;
+                    const freq = this.melodyNotes[this.noteIndex % this.melodyNotes.length];
+                    this.noteIndex++;
+
+                    const osc = this.ctx.createOscillator();
+                    const gain = this.ctx.createGain();
+                    osc.type = 'sine';
+                    osc.frequency.setValueAtTime(freq, now);
+
+                    gain.gain.setValueAtTime(0.045, now);
+                    gain.gain.exponentialRampToValueAtTime(0.001, now + 0.22);
+
+                    osc.connect(gain);
+                    gain.connect(this.ctx.destination);
+                    osc.start(now);
+                    osc.stop(now + 0.22);
+                }, 260);
+            }
+
+            stopBGM() {
+                if (this.bgmInterval) {
+                    clearInterval(this.bgmInterval);
+                    this.bgmInterval = null;
+                }
+            }
+        }
+
+        const audioEngine = new SpaceAudioEngine();
+
+        /**
+         * ============================================================================
+         * 2. KEADAAN PERMAINAN & KONFIGURASI
+         * ============================================================================
+         */
+        const canvas = document.getElementById('gameCanvas');
+        const ctx = canvas.getContext('2d');
+        const videoElement = document.getElementById('webcamVideo');
+
+        const gameState = {
+            isPlaying: false,
+            score: 0,
+            lives: 3,
+            maxLives: 3,
+            combo: 0,
+            maxCombo: 0,
+            correctCount: 0,
+            timeLeft: 60,
+            tableRange: 'all', // 'all', 'easy', 'hard'
+            currentQuestion: null, // { a, b, answer }
+            asteroids: [],
+            particles: [],
+            lasers: [],
+            floatingTexts: [],
+            stars: [],
+            mistakes: [], // Merekod jawapan salah atau terlepas untuk analisis
+            cameraReady: false,
+            timerInterval: null,
+            lastTime: 0
+        };
+
+        // Struktur penjejakan kedua-dua tangan (sehingga 2 tangan)
+        let trackedHands = [];
+        // Sandaran tetikus jika kamera tiada
+        let mousePointer = { x: -100, y: -100, active: false };
+
+        // Warna Neon Meteor
+        const METEOR_THEMES = [
+            { fill: '#1e1b4b', stroke: '#38bdf8', glow: 'rgba(56, 189, 248, 0.7)' },
+            { fill: '#2e1065', stroke: '#e879f9', glow: 'rgba(232, 121, 249, 0.7)' },
+            { fill: '#172554', stroke: '#34d399', glow: 'rgba(52, 211, 153, 0.7)' },
+            { fill: '#31102f', stroke: '#fbbf24', glow: 'rgba(251, 191, 36, 0.7)' }
+        ];
+
+        /**
+         * ============================================================================
+         * 3. PENGURUSAN SAIZ KANVAS & BINTANG LATAR
+         * ============================================================================
+         */
+        function resizeCanvas() {
+            canvas.width = window.innerWidth;
+            canvas.height = window.innerHeight;
+            initStars();
+        }
+
+        function initStars() {
+            gameState.stars = [];
+            const count = Math.floor((canvas.width * canvas.height) / 14000);
+            for (let i = 0; i < count; i++) {
+                gameState.stars.push({
+                    x: Math.random() * canvas.width,
+                    y: Math.random() * canvas.height,
+                    radius: Math.random() * 2 + 0.5,
+                    speed: Math.random() * 0.5 + 0.15,
+                    alpha: Math.random() * 0.8 + 0.2
+                });
+            }
+        }
+
+        window.addEventListener('resize', resizeCanvas);
+        resizeCanvas();
+
+        /**
+         * ============================================================================
+         * 4. PENJANA SOALAN SIFIR (TAHUN 3: SIFIR 2 HINGGA 12) & METEOR
+         * ============================================================================
+         */
+        function getMultiplierPool() {
+            if (gameState.tableRange === 'easy') return [2, 3, 4, 5, 10];
+            if (gameState.tableRange === 'hard') return [6, 7, 8, 9, 11, 12];
+            return [2, 3, 4, 5, 6, 7, 8, 9, 10, 11, 12];
+        }
+
+        function generateNewQuestion() {
+            const pool = getMultiplierPool();
+            const a = pool[Math.floor(Math.random() * pool.length)];
+            const b = Math.floor(Math.random() * 11) + 2; // 2 hingga 12
+            const answer = a * b;
+
+            gameState.currentQuestion = { a, b, answer };
+            document.getElementById('questionDisplay').textContent = `${a} × ${b} = ?`;
+
+            spawnAsteroidWave(a, b, answer);
+        }
+
+        function spawnAsteroidWave(a, b, correctAnswer) {
+            gameState.asteroids = [];
+            const numAsteroids = 4; // 1 jawapan betul + 3 pengganggu munasabah
+            const values = new Set([correctAnswer]);
+
+            // Jana jawapan pengganggu yang logik (cth: hasil darab bersebelahan atau ralat lazim murid)
+            while (values.size < numAsteroids) {
+                const strategy = Math.random();
+                let distractor;
+                if (strategy < 0.4) {
+                    // Sifir bersebelahan: a * (b ± 1)
+                    const offset = Math.random() < 0.5 ? 1 : -1;
+                    distractor = a * Math.max(1, b + offset);
+                } else if (strategy < 0.7) {
+                    // Sifir lain: (a ± 1) * b
+                    const offset = Math.random() < 0.5 ? 1 : -1;
+                    distractor = Math.max(2, a + offset) * b;
+                } else {
+                    // Tambah/tolak kecil
+                    const delta = (Math.floor(Math.random() * 5) + 1) * (Math.random() < 0.5 ? 1 : -1);
+                    distractor = Math.max(4, correctAnswer + delta);
+                }
+                if (distractor !== correctAnswer && distractor > 0) {
+                    values.add(distractor);
+                }
+            }
+
+            const valueArray = Array.from(values).sort(() => Math.random() - 0.5);
+            const margin = Math.min(110, canvas.width * 0.12);
+            const usableWidth = canvas.width - margin * 2;
+            const slotWidth = usableWidth / numAsteroids;
+
+            valueArray.forEach((val, index) => {
+                const radius = Math.max(42, Math.min(58, canvas.width * 0.048));
+                const x = margin + slotWidth * index + slotWidth / 2 + (Math.random() * 30 - 15);
+                const y = -radius - Math.random() * 140; // Mula dari atas skrin secara berperingkat
+                
+                // Kelajuan jatuh seimbang dan mesra murid Tahun 3
+                const baseSpeed = Math.max(1.15, canvas.height / 540);
+                const speed = baseSpeed + Math.random() * 0.45 + Math.min(0.6, gameState.correctCount * 0.03);
+
+                // Bentuk poligon batu asteroid tidak sekata
+                const vertices = [];
+                const numVerts = 10;
+                for (let v = 0; v < numVerts; v++) {
+                    const angle = (v / numVerts) * Math.PI * 2;
+                    const jag = 0.84 + Math.random() * 0.26;
+                    vertices.push({
+                        x: Math.cos(angle) * radius * jag,
+                        y: Math.sin(angle) * radius * jag
+                    });
+                }
+
+                const theme = METEOR_THEMES[index % METEOR_THEMES.length];
+
+                gameState.asteroids.push({
+                    x,
+                    y,
+                    radius,
+                    speed,
+                    value: val,
+                    isCorrect: val === correctAnswer,
+                    rotation: Math.random() * Math.PI * 2,
+                    rotSpeed: (Math.random() - 0.5) * 0.025,
+                    vertices,
+                    theme,
+                    isTargeted: false
+                });
+            });
+        }
+
+        /**
+         * ============================================================================
+         * 5. KESAN LETUPAN ZARAH NEON, LASER & TEKS TERAPUNG
+         * ============================================================================
+         */
+        function createExplosion(x, y, color, isBig = true) {
+            const count = isBig ? 36 : 16;
+            for (let i = 0; i < count; i++) {
+                const angle = Math.random() * Math.PI * 2;
+                const speed = (Math.random() * 6 + 2) * (isBig ? 1.2 : 0.8);
+                gameState.particles.push({
+                    x,
+                    y,
+                    vx: Math.cos(angle) * speed,
+                    vy: Math.sin(angle) * speed,
+                    size: Math.random() * 5 + 2.5,
+                    color: i % 2 === 0 ? color : '#ffffff',
+                    alpha: 1,
+                    decay: Math.random() * 0.025 + 0.018
+                });
+            }
+            // Gelombang kejutan (Shockwave ring)
+            gameState.particles.push({
+                x,
+                y,
+                isRing: true,
+                radius: 10,
+                maxRadius: isBig ? 115 : 65,
+                color,
+                alpha: 0.9,
+                decay: 0.045
+            });
+        }
+
+        function createLaserBeam(x1, y1, x2, y2, color = '#22d3ee') {
+            gameState.lasers.push({
+                x1, y1, x2, y2,
+                color,
+                alpha: 1
+            });
+        }
+
+        function createFloatingText(x, y, text, color) {
+            gameState.floatingTexts.push({
+                x, y,
+                text,
+                color,
+                alpha: 1,
+                vy: -1.8
+            });
+        }
+
+        function triggerScreenShake() {
+            document.body.classList.remove('screen-shake');
+            void document.body.offsetWidth; // Force reflow
+            document.body.classList.add('screen-shake');
+        }
+
+        function showToast(msg, type = 'info') {
+            const box = document.getElementById('toastBox');
+            const content = document.getElementById('toastContent');
+            content.textContent = msg;
+            
+            if (type === 'success') {
+                content.className = 'px-6 py-2.5 rounded-full font-bold text-base sm:text-lg shadow-lg border-2 bg-emerald-950/90 border-emerald-400 text-emerald-300';
+            } else if (type === 'error') {
+                content.className = 'px-6 py-2.5 rounded-full font-bold text-base sm:text-lg shadow-lg border-2 bg-rose-950/90 border-rose-400 text-rose-300';
+            } else {
+                content.className = 'px-6 py-2.5 rounded-full font-bold text-base sm:text-lg shadow-lg border-2 bg-cyan-950/90 border-cyan-400 text-cyan-300';
+            }
+
+            box.classList.remove('opacity-0', 'scale-90');
+            box.classList.add('opacity-100', 'scale-100');
+
+            clearTimeout(box._timeout);
+            box._timeout = setTimeout(() => {
+                box.classList.remove('opacity-100', 'scale-100');
+                box.classList.add('opacity-0', 'scale-90');
+            }, 1400);
+        }
+
+        /**
+         * ============================================================================
+         * 6. LOGIK TEMBAKAN & PENGIRAAN SKOR / NYAWA
+         * ============================================================================
+         */
+        function handleLaserShot(pointerX, pointerY, wristX, wristY) {
+            if (!gameState.isPlaying) return;
+
+            audioEngine.playLaser();
+            createLaserBeam(wristX || pointerX, wristY || canvas.height, pointerX, pointerY, '#38bdf8');
+
+            // Cari asteroid yang bertindih dengan titik sasaran jari (dengan sedikit toleransi radius)
+            let hitIndex = -1;
+            let closestDist = Infinity;
+
+            gameState.asteroids.forEach((ast, idx) => {
+                const dist = Math.hypot(ast.x - pointerX, ast.y - pointerY);
+                if (dist <= ast.radius + 24 && dist < closestDist) {
+                    closestDist = dist;
+                    hitIndex = idx;
+                }
+            });
+
+            if (hitIndex !== -1) {
+                const hitAst = gameState.asteroids[hitIndex];
+                
+                if (hitAst.isCorrect) {
+                    // JAWAPAN BETUL!
+                    audioEngine.playExplosionSuccess();
+                    gameState.combo++;
+                    if (gameState.combo > gameState.maxCombo) gameState.maxCombo = gameState.combo;
+                    gameState.correctCount++;
+
+                    const points = 100 + (gameState.combo - 1) * 25;
+                    gameState.score += points;
+
+                    createExplosion(hitAst.x, hitAst.y, '#34d399', true);
+                    createFloatingText(hitAst.x, hitAst.y - 20, `+${points}`, '#34d399');
+                    if (gameState.combo >= 2) {
+                        createFloatingText(hitAst.x, hitAst.y - 52, `KOMBO ${gameState.combo}x!`, '#f472b6');
+                    }
+
+                    updateHudUI();
+                    generateNewQuestion();
+                } else {
+                    // JAWAPAN SALAH!
+                    audioEngine.playError();
+                    triggerScreenShake();
+                    gameState.combo = 0;
+                    gameState.lives--;
+
+                    // Rekod kesilapan untuk analisis akhir
+                    const q = gameState.currentQuestion;
+                    gameState.mistakes.push({
+                        question: `${q.a} × ${q.b}`,
+                        userAnswer: hitAst.value,
+                        correctAnswer: q.answer,
+                        reason: 'Tersalah tembak'
+                    });
+
+                    createExplosion(hitAst.x, hitAst.y, '#f43f5e', false);
+                    createFloatingText(hitAst.x, hitAst.y - 20, `SALAH! (${hitAst.value})`, '#fb7185');
+                    
+                    // Buang asteroid yang salah supaya tidak ditembak dua kali
+                    gameState.asteroids.splice(hitIndex, 1);
+                    updateHudUI();
+
+                    if (gameState.lives <= 0) {
+                        endGame('PERISAI MUSNAH!');
+                    }
+                }
+            } else {
+                // Tembakan tersasar di ruang kosong (percikan kecil)
+                createExplosion(pointerX, pointerY, '#38bdf8', false);
+            }
+        }
+
+        function updateHudUI() {
+            document.getElementById('scoreDisplay').textContent = gameState.score;
+            
+            // Kemas kini Hati Nyawa
+            const heartsContainer = document.getElementById('heartsContainer');
+            heartsContainer.innerHTML = '';
+            for (let i = 0; i < gameState.maxLives; i++) {
+                const span = document.createElement('span');
+                if (i < gameState.lives) {
+                    span.textContent = '❤️';
+                    span.className = 'drop-shadow-[0_0_8px_rgba(244,63,94,0.8)] transition-transform duration-300 scale-100';
+                } else {
+                    span.textContent = '🖤';
+                    span.className = 'opacity-40 scale-90 transition-all duration-300';
+                }
+                heartsContainer.appendChild(span);
+            }
+
+            // Kemas kini Kombo
+            const comboBadge = document.getElementById('comboBadge');
+            if (gameState.combo >= 2) {
+                comboBadge.classList.remove('hidden');
+                document.getElementById('comboText').textContent = `${gameState.combo}x`;
+            } else {
+                comboBadge.classList.add('hidden');
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 7. PENGESANAN TANGAN & ISYARAT PINCH (GOOGLE MEDIAPIPE HANDS)
+         * ============================================================================
+         */
+        function onHandsResults(results) {
+            const newHands = [];
+            const statusDot = document.getElementById('handStatusDot');
+            const statusText = document.getElementById('handStatusText');
+
+            if (results.multiHandLandmarks && results.multiHandLandmarks.length > 0) {
+                results.multiHandLandmarks.forEach((landmarks, idx) => {
+                    // Koordinat cermin (mirror) supaya selari dengan pergerakan pemain
+                    const indexTip = {
+                        x: (1 - landmarks[8].x) * canvas.width,
+                        y: landmarks[8].y * canvas.height
+                    };
+                    const thumbTip = {
+                        x: (1 - landmarks[4].x) * canvas.width,
+                        y: landmarks[4].y * canvas.height
+                    };
+                    const wrist = {
+                        x: (1 - landmarks[0].x) * canvas.width,
+                        y: landmarks[0].y * canvas.height
+                    };
+                    const middleMcp = {
+                        x: (1 - landmarks[9].x) * canvas.width,
+                        y: landmarks[9].y * canvas.height
+                    };
+
+                    // Skala tangan untuk ambang Pinch yang responsif tanpa mengira jarak dari kamera
+                    const handSize = Math.hypot(wrist.x - middleMcp.x, wrist.y - middleMcp.y);
+                    const pinchDist = Math.hypot(indexTip.x - thumbTip.x, indexTip.y - thumbTip.y);
+                    const pinchThreshold = Math.max(28, handSize * 0.36);
+                    const isPinching = pinchDist < pinchThreshold;
+
+                    // Semak keadaan pinch sebelumnya untuk tangan ini bagi mengesan pencetus (trigger) tunggal
+                    const prevHand = trackedHands[idx];
+                    const wasPinching = prevHand ? prevHand.isPinching : false;
+
+                    if (isPinching && !wasPinching) {
+                        // Isyarat PINCH baru dikesan -> Tembak Laser!
+                        handleLaserShot(indexTip.x, indexTip.y, wrist.x, wrist.y);
+                    }
+
+                    // Simpan landmarks dicerminkan untuk lukisan overlay
+                    const mirroredLandmarks = landmarks.map(lm => ({
+                        x: 1 - lm.x,
+                        y: lm.y,
+                        z: lm.z
+                    }));
+
+                    newHands.push({
+                        landmarks: mirroredLandmarks,
+                        indexTip,
+                        thumbTip,
+                        wrist,
+                        isPinching,
+                        pinchRatio: Math.min(1, pinchDist / pinchThreshold)
+                    });
+                });
+
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-emerald-400 shadow-[0_0_8px_#34d399]';
+                statusText.textContent = `${newHands.length} Perisai Tangan Aktif • Cubit (Pinch) untuk Tembak!`;
+            } else {
+                statusDot.className = 'w-2.5 h-2.5 rounded-full bg-amber-400 animate-pulse';
+                statusText.textContent = 'Angkat tangan anda di hadapan kamera...';
+            }
+
+            trackedHands = newHands;
+        }
+
+        async function initMediaPipe() {
+            try {
+                const hands = new Hands({
+                    locateFile: (file) => `https://cdn.jsdelivr.net/npm/@mediapipe/hands/${file}`
+                });
+
+                hands.setOptions({
+                    maxNumHands: 2, // Menjejak kedua-dua tangan pemain
+                    modelComplexity: 1,
+                    minDetectionConfidence: 0.65,
+                    minTrackingConfidence: 0.6
+                });
+
+                hands.onResults(onHandsResults);
+
+                const camera = new Camera(videoElement, {
+                    onFrame: async () => {
+                        await hands.send({ image: videoElement });
+                    },
+                    width: 1280,
+                    height: 720
+                });
+
+                await camera.start();
+                gameState.cameraReady = true;
+                
+                const startBtn = document.getElementById('startBtn');
+                startBtn.disabled = false;
+                document.getElementById('startBtnSpinner').classList.add('hidden');
+                document.getElementById('startBtnText').textContent = 'MULA MISI ANGKASA';
+            } catch (err) {
+                console.warn('Kamera tidak tersedia, mod tetikus diaktifkan:', err);
+                const startBtn = document.getElementById('startBtn');
+                startBtn.disabled = false;
+                document.getElementById('startBtnSpinner').classList.add('hidden');
+                document.getElementById('startBtnText').textContent = 'MULA (MOD TETIKUS)';
+                document.getElementById('cameraHint').textContent = 'Kamera tidak dikesan. Anda boleh klik menggunakan tetikus untuk menembak meteor.';
+            }
+        }
+
+        // Sokongan sandaran Tetikus / Sentuhan
+        canvas.addEventListener('mousemove', (e) => {
+            mousePointer.x = e.clientX;
+            mousePointer.y = e.clientY;
+            mousePointer.active = true;
+        });
+
+        canvas.addEventListener('mousedown', (e) => {
+            if (!gameState.isPlaying) return;
+            handleLaserShot(e.clientX, e.clientY, canvas.width / 2, canvas.height);
+        });
+
+        /**
+         * ============================================================================
+         * 8. GELUNG LUKISAN & KEMAS KINI PERMAINAN (60 FPS)
+         * ============================================================================
+         */
+        function drawWebcamBackground() {
+            if (gameState.cameraReady && videoElement.readyState >= 2) {
+                ctx.save();
+                // Lukis video secara cermin (mirror) memenuhi skrin tanpa herotan nisbah
+                const vidRatio = videoElement.videoWidth / videoElement.videoHeight;
+                const canvasRatio = canvas.width / canvas.height;
+                let drawW, drawH, offsetX, offsetY;
+
+                if (canvasRatio > vidRatio) {
+                    drawW = canvas.width;
+                    drawH = canvas.width / vidRatio;
+                    offsetX = 0;
+                    offsetY = (canvas.height - drawH) / 2;
+                } else {
+                    drawH = canvas.height;
+                    drawW = canvas.height * vidRatio;
+                    offsetX = (canvas.width - drawW) / 2;
+                    offsetY = 0;
+                }
+
+                ctx.translate(canvas.width, 0);
+                ctx.scale(-1, 1);
+                ctx.drawImage(videoElement, offsetX, offsetY, drawW, drawH);
+                ctx.restore();
+
+                // Tindihan gelap lutsinar angkasa supaya neon & meteor sangat jelas dibaca
+                ctx.fillStyle = 'rgba(6, 11, 28, 0.58)';
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            } else {
+                // Latar belakang angkasa penuh jika kamera belum bersedia
+                const grad = ctx.createRadialGradient(canvas.width/2, canvas.height/2, 50, canvas.width/2, canvas.height/2, canvas.width);
+                grad.addColorStop(0, '#0f172a');
+                grad.addColorStop(1, '#020617');
+                ctx.fillStyle = grad;
+                ctx.fillRect(0, 0, canvas.width, canvas.height);
+            }
+        }
+
+        function drawStars() {
+            gameState.stars.forEach(star => {
+                star.y += star.speed;
+                if (star.y > canvas.height) {
+                    star.y = 0;
+                    star.x = Math.random() * canvas.width;
+                }
+                ctx.beginPath();
+                ctx.arc(star.x, star.y, star.radius, 0, Math.PI * 2);
+                ctx.fillStyle = `rgba(186, 230, 253, ${star.alpha})`;
+                ctx.fill();
+            });
+        }
+
+        function drawHandLandmarksAndCrosshairs() {
+            trackedHands.forEach((hand, hIdx) => {
+                const primaryColor = hIdx === 0 ? '#22d3ee' : '#e879f9'; // Tangan 1 Cyan, Tangan 2 Magenta
+
+                // 1. Lukis rangka sambungan jari (Landmarks Overlay)
+                if (typeof drawConnectors !== 'undefined' && typeof HAND_CONNECTIONS !== 'undefined') {
+                    drawConnectors(ctx, hand.landmarks, HAND_CONNECTIONS, {
+                        color: hIdx === 0 ? 'rgba(34, 211, 238, 0.45)' : 'rgba(232, 121, 249, 0.45)',
+                        lineWidth: 2.5
+                    });
+                    drawLandmarks(ctx, hand.landmarks, {
+                        color: '#ffffff',
+                        fillColor: primaryColor,
+                        lineWidth: 1,
+                        radius: 3
+                    });
+                }
+
+                // 2. Lukis Garis Tenaga antara Ibu Jari & Jari Telunjuk (Penunjuk Isyarat Pinch)
+                ctx.beginPath();
+                ctx.moveTo(hand.thumbTip.x, hand.thumbTip.y);
+                ctx.lineTo(hand.indexTip.x, hand.indexTip.y);
+                ctx.strokeStyle = hand.isPinching ? '#fbbf24' : 'rgba(255, 255, 255, 0.5)';
+                ctx.lineWidth = hand.isPinching ? 4 : 2;
+                ctx.setLineDash(hand.isPinching ? [] : [4, 4]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // 3. Lukis Perisai Sasaran Laser pada Hujung Jari Telunjuk
+                const { x, y } = hand.indexTip;
+                ctx.save();
+                ctx.translate(x, y);
+
+                // Gelang luar berputar
+                ctx.rotate(performance.now() * 0.003 * (hIdx === 0 ? 1 : -1));
+                ctx.beginPath();
+                ctx.arc(0, 0, hand.isPinching ? 20 : 28, 0, Math.PI * 2);
+                ctx.strokeStyle = hand.isPinching ? '#fbbf24' : primaryColor;
+                ctx.lineWidth = 3;
+                ctx.setLineDash([10, 6]);
+                ctx.stroke();
+                ctx.setLineDash([]);
+
+                // Tanda pangkah (Crosshair) dalam
+                ctx.beginPath();
+                ctx.moveTo(-12, 0); ctx.lineTo(12, 0);
+                ctx.moveTo(0, -12); ctx.lineTo(0, 12);
+                ctx.strokeStyle = '#ffffff';
+                ctx.lineWidth = 2;
+                ctx.stroke();
+
+                // Titik tengah bercahaya
+                ctx.beginPath();
+                ctx.arc(0, 0, 5, 0, Math.PI * 2);
+                ctx.fillStyle = hand.isPinching ? '#fbbf24' : primaryColor;
+                ctx.shadowColor = primaryColor;
+                ctx.shadowBlur = 15;
+                ctx.fill();
+
+                ctx.restore();
+            });
+        }
+
+        function updateAndDrawAsteroids() {
+            let missedCorrect = false;
+
+            for (let i = gameState.asteroids.length - 1; i >= 0; i--) {
+                const ast = gameState.asteroids[i];
+                ast.y += ast.speed;
+                ast.rotation += ast.rotSpeed;
+
+                // Semak jika mana-mana penunjuk laser berada di atas meteor ini
+                ast.isTargeted = trackedHands.some(h => Math.hypot(h.indexTip.x - ast.x, h.indexTip.y - ast.y) <= ast.radius + 20) ||
+                                 (mousePointer.active && Math.hypot(mousePointer.x - ast.x, mousePointer.y - ast.y) <= ast.radius + 20);
+
+                // Lukis Meteor
+                ctx.save();
+                ctx.translate(ast.x, ast.y);
+
+                // Kesan sorotan sasaran jika jari menunjuk ke arah meteor
+                if (ast.isTargeted) {
+                    ctx.beginPath();
+                    ctx.arc(0, 0, ast.radius + 12, 0, Math.PI * 2);
+                    ctx.strokeStyle = '#fbbf24';
+                    ctx.lineWidth = 3;
+                    ctx.setLineDash([8, 6]);
+                    ctx.stroke();
+                    ctx.setLineDash([]);
+                }
+
+                // Badan batu poligon
+                ctx.save();
+                ctx.rotate(ast.rotation);
+                ctx.beginPath();
+                ast.vertices.forEach((v, idx) => {
+                    if (idx === 0) ctx.moveTo(v.x, v.y);
+                    else ctx.lineTo(v.x, v.y);
+                });
+                ctx.closePath();
+
+                ctx.fillStyle = ast.theme.fill;
+                ctx.shadowColor = ast.isTargeted ? '#fbbf24' : ast.theme.glow;
+                ctx.shadowBlur = ast.isTargeted ? 25 : 16;
+                ctx.fill();
+
+                ctx.lineWidth = ast.isTargeted ? 4 : 3;
+                ctx.strokeStyle = ast.isTargeted ? '#fbbf24' : ast.theme.stroke;
+                ctx.stroke();
+                ctx.restore();
+
+                // Nombor Jawapan di tengah meteor (tidak berputar supaya mudah dibaca murid)
+                ctx.fillStyle = '#ffffff';
+                ctx.font = `900 ${Math.floor(ast.radius * 0.62)}px 'Orbitron', sans-serif`;
+                ctx.textAlign = 'center';
+                ctx.textBaseline = 'middle';
+                ctx.shadowColor = 'rgba(0,0,0,0.9)';
+                ctx.shadowBlur = 6;
+                ctx.fillText(ast.value, 0, 2);
+
+                ctx.restore();
+
+                // Semak jika meteor jatuh melepasi bahagian bawah skrin
+                if (ast.y - ast.radius > canvas.height) {
+                    if (ast.isCorrect) {
+                        missedCorrect = true;
+                    }
+                    gameState.asteroids.splice(i, 1);
+                }
+            }
+
+            if (missedCorrect && gameState.isPlaying) {
+                audioEngine.playError();
+                triggerScreenShake();
+                gameState.combo = 0;
+                gameState.lives--;
+
+                const q = gameState.currentQuestion;
+                gameState.mistakes.push({
+                    question: `${q.a} × ${q.b}`,
+                    userAnswer: 'Terlepas',
+                    correctAnswer: q.answer,
+                    reason: 'Meteor terlepas ke bumi'
+                });
+
+                showToast(`Terlepas! Jawapan ${q.a} × ${q.b} ialah ${q.answer}`, 'error');
+                updateHudUI();
+
+                if (gameState.lives <= 0) {
+                    endGame('PERISAI MUSNAH!');
+                } else {
+                    generateNewQuestion();
+                }
+            }
+        }
+
+        function updateAndDrawEffects() {
+            // 1. Pancaran Laser
+            for (let i = gameState.lasers.length - 1; i >= 0; i--) {
+                const l = gameState.lasers[i];
+                ctx.save();
+                ctx.beginPath();
+                ctx.moveTo(l.x1, l.y1);
+                ctx.lineTo(l.x2, l.y2);
+                ctx.strokeStyle = l.color;
+                ctx.globalAlpha = l.alpha;
+                ctx.lineWidth = 6 * l.alpha;
+                ctx.shadowColor = l.color;
+                ctx.shadowBlur = 18;
+                ctx.stroke();
+
+                // Teras putih laser
+                ctx.lineWidth = 2 * l.alpha;
+                ctx.strokeStyle = '#ffffff';
+                ctx.stroke();
+                ctx.restore();
+
+                l.alpha -= 0.12;
+                if (l.alpha <= 0) gameState.lasers.splice(i, 1);
+            }
+
+            // 2. Zarah Letupan Neon
+            for (let i = gameState.particles.length - 1; i >= 0; i--) {
+                const p = gameState.particles[i];
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, p.alpha);
+
+                if (p.isRing) {
+                    p.radius += (p.maxRadius - p.radius) * 0.18;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.radius, 0, Math.PI * 2);
+                    ctx.strokeStyle = p.color;
+                    ctx.lineWidth = 4;
+                    ctx.stroke();
+                } else {
+                    p.x += p.vx;
+                    p.y += p.vy;
+                    p.vx *= 0.96;
+                    p.vy *= 0.96;
+                    ctx.beginPath();
+                    ctx.arc(p.x, p.y, p.size, 0, Math.PI * 2);
+                    ctx.fillStyle = p.color;
+                    ctx.shadowColor = p.color;
+                    ctx.shadowBlur = 10;
+                    ctx.fill();
+                }
+
+                ctx.restore();
+                p.alpha -= p.decay;
+                if (p.alpha <= 0) gameState.particles.splice(i, 1);
+            }
+
+            // 3. Teks Skor / Maklum Balas Terapung
+            for (let i = gameState.floatingTexts.length - 1; i >= 0; i--) {
+                const ft = gameState.floatingTexts[i];
+                ctx.save();
+                ctx.globalAlpha = Math.max(0, ft.alpha);
+                ctx.font = "900 24px 'Fredoka', sans-serif";
+                ctx.fillStyle = ft.color;
+                ctx.textAlign = 'center';
+                ctx.shadowColor = 'rgba(0,0,0,0.85)';
+                ctx.shadowBlur = 8;
+                ctx.fillText(ft.text, ft.x, ft.y);
+                ctx.restore();
+
+                ft.y += ft.vy;
+                ft.alpha -= 0.022;
+                if (ft.alpha <= 0) gameState.floatingTexts.splice(i, 1);
+            }
+        }
+
+        function gameLoop() {
+            ctx.clearRect(0, 0, canvas.width, canvas.height);
+
+            drawWebcamBackground();
+            drawStars();
+
+            if (gameState.isPlaying) {
+                updateAndDrawAsteroids();
+            }
+
+            updateAndDrawEffects();
+            drawHandLandmarksAndCrosshairs();
+
+            requestAnimationFrame(gameLoop);
+        }
+
+        /**
+         * ============================================================================
+         * 9. KAWALAN ALIRAN PERMAINAN (MULA, TAMAT, ANALISIS KEPUTUSAN)
+         * ============================================================================
+         */
+        function startGame() {
+            audioEngine.init();
+            audioEngine.startBGM();
+
+            gameState.isPlaying = true;
+            gameState.score = 0;
+            gameState.lives = 3;
+            gameState.combo = 0;
+            gameState.maxCombo = 0;
+            gameState.correctCount = 0;
+            gameState.timeLeft = 60;
+            gameState.mistakes = [];
+            gameState.asteroids = [];
+            gameState.particles = [];
+            gameState.floatingTexts = [];
+
+            document.getElementById('startScreen').classList.add('hidden');
+            document.getElementById('resultScreen').classList.add('hidden');
+            document.getElementById('gameHud').classList.remove('hidden');
+
+            const timerDisplay = document.getElementById('timerDisplay');
+            timerDisplay.textContent = '60s';
+            timerDisplay.className = 'font-orbitron text-xl sm:text-2xl font-bold text-emerald-400';
+
+            updateHudUI();
+            generateNewQuestion();
+
+            clearInterval(gameState.timerInterval);
+            gameState.timerInterval = setInterval(() => {
+                if (!gameState.isPlaying) return;
+                gameState.timeLeft--;
+                timerDisplay.textContent = `${gameState.timeLeft}s`;
+
+                if (gameState.timeLeft <= 10) {
+                    timerDisplay.className = 'font-orbitron text-xl sm:text-2xl font-bold text-rose-400 animate-pulse';
+                }
+
+                if (gameState.timeLeft <= 0) {
+                    endGame('MASA TAMAT!');
+                }
+            }, 1000);
+        }
+
+        function endGame(reason) {
+            gameState.isPlaying = false;
+            clearInterval(gameState.timerInterval);
+            audioEngine.stopBGM();
+
+            document.getElementById('gameHud').classList.add('hidden');
+            document.getElementById('resultScreen').classList.remove('hidden');
+
+            document.getElementById('endReasonBadge').textContent = reason;
+            document.getElementById('finalScore').textContent = gameState.score;
+            document.getElementById('finalCorrect').textContent = gameState.correctCount;
+            document.getElementById('finalMaxCombo').textContent = `${gameState.maxCombo}x`;
+
+            // Bina Senarai Analisis Jawapan Salah / Terlepas
+            const analysisContainer = document.getElementById('analysisContainer');
+            analysisContainer.innerHTML = '';
+
+            if (gameState.mistakes.length === 0) {
+                analysisContainer.innerHTML = `
+                    <div class="flex flex-col items-center justify-center py-6 text-center">
+                        <div class="text-4xl mb-2">🏆</div>
+                        <p class="text-emerald-400 font-bold text-base">Cemerlang! Tiada kesilapan direkodkan.</p>
+                        <p class="text-slate-400 text-xs mt-1">Anda menguasai sifir dengan sangat tepat dan pantas!</p>
+                    </div>
+                `;
+            } else {
+                gameState.mistakes.forEach((item) => {
+                    const row = document.createElement('div');
+                    row.className = 'flex items-center justify-between bg-slate-800/90 border border-slate-700 rounded-xl px-4 py-2.5';
+                    row.innerHTML = `
+                        <div class="flex items-center gap-3">
+                            <span class="font-orbitron font-bold text-white text-base sm:text-lg">${item.question}</span>
+                            <span class="text-xs px-2 py-0.5 rounded bg-rose-500/20 text-rose-300 border border-rose-500/30">
+                                ${item.reason}: <strong>${item.userAnswer}</strong>
+                            </span>
+                        </div>
+                        <div class="text-right">
+                            <span class="text-xs text-slate-400 block">Jawapan Betul</span>
+                            <span class="font-orbitron font-bold text-emerald-400 text-base sm:text-lg">${item.correctAnswer}</span>
+                        </div>
+                    `;
+                    analysisContainer.appendChild(row);
+                });
+            }
+        }
+
+        /**
+         * ============================================================================
+         * 10. PENDENGAR ACARA UI & PERMULAAN APLIKASI
+         * ============================================================================
+         */
+        document.querySelectorAll('.filter-btn').forEach(btn => {
+            btn.addEventListener('click', () => {
+                document.querySelectorAll('.filter-btn').forEach(b => {
+                    b.className = 'filter-btn px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-slate-800/90 text-slate-300 border-2 border-slate-700 hover:border-cyan-400 cursor-pointer transition';
+                });
+                btn.className = 'filter-btn active px-4 py-2 rounded-xl text-xs sm:text-sm font-bold bg-cyan-500 text-slate-950 border-2 border-cyan-300 cursor-pointer transition';
+                gameState.tableRange = btn.dataset.range;
+            });
+        });
+
+        document.getElementById('startBtn').addEventListener('click', startGame);
+        document.getElementById('restartBtn').addEventListener('click', startGame);
+
+        document.getElementById('muteBtn').addEventListener('click', () => {
+            const muted = audioEngine.toggleMute();
+            document.getElementById('soundOnIcon').classList.toggle('hidden', muted);
+            document.getElementById('soundOffIcon').classList.toggle('hidden', !muted);
+        });
+
+        window.onload = function () {
+            initMediaPipe();
+            gameLoop();
+        };
+    </script>
+</body>
+</html>
